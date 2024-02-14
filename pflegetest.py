@@ -1,13 +1,12 @@
 #IMPORT LIBRARIES
 import psycopg2
-import csv
 import pandas as pd
 from sqlalchemy import create_engine
 import numpy as np
 from scipy.stats import chi2_contingency
 
-pd.set_option('display.max_columns', None)
-pd.set_option('display.max_rows', None)
+#pd.set_option('display.max_columns', None)
+#pd.set_option('display.max_rows', None)
 
 def connection(db, user, password):
   conn = psycopg2.connect(
@@ -127,9 +126,85 @@ def pflegestufe(db, user, password):
   cur.close() 
   conn.close()
 
+def pflegeprognose(db, user, password):
+  cur, conn = connection(db, user, password)
+
+  query1 = '''SELECT 
+                jahr,
+                gruppe_20,
+                geschlecht,
+                bkz_id,
+                SUM(pgb) AS pgb,
+                SUM(bev) AS bev,
+                SUM(pgb)/SUM(bev)*100 AS rate
+            FROM 
+                projekte.v_pflege_plz
+            LEFT JOIN
+                public.v_plz ON
+                    projekte.v_pflege_plz.plz = public.v_plz.id
+            WHERE 
+                jahr = 2022
+            GROUP BY
+                jahr,
+                gruppe_20,
+                geschlecht,
+                bkz_id
+                ;'''
+    
+  cur.execute(query1)
+  tuples_list = cur.fetchall()
+  colnames = [desc[0] for desc in cur.description]
+  df = pd.DataFrame(tuples_list, columns=colnames)
+  #df['id'] = df['geschlecht'] + df['bkz_id'] + df['gruppe_20']
+  df.drop(columns=['pgb', 'bev', 'jahr'], axis=1, inplace=True)
+  df['geschlecht'] = df['geschlecht'].map(lambda x: '1' if (x == 'männlich') else '2')
+  df['rate'] = df['rate'].astype(float)
+  query2  = '''
+            SELECT
+                jahr,
+                CAST(LEFT(gkz, 3) AS INT) AS bkz_id,
+                geschlecht,
+                gruppe_20,
+                SUM(pop)
+            FROM
+                public.t_einzeljahre_prog
+            LEFT JOIN
+                projekte.l_pflege_alter ON
+                    CAST (projekte.l_pflege_alter.id AS INT) = public.t_einzeljahre_prog.alter
+            GROUP BY
+                bkz_id,
+                geschlecht,
+                gruppe_20,
+                jahr
+            '''
+  cur.execute(query2)
+  tuples_list = cur.fetchall()
+  colnames = [desc[0] for desc in cur.description]
+  df2 = pd.DataFrame(tuples_list, columns=colnames)
+ 
+  df2['bkz_id'] = df2['bkz_id'].astype(object)
+  #df2['id'] = df2['geschlecht'].astype(str) + df2['bkz_id'].astype(str) + df2['gruppe_20'].astype(str)
+  full_df = df.merge(df2, on=['bkz_id', 'geschlecht', 'gruppe_20'],  how='right')
+  #print(df)
+  #df.to_csv("C:/Users/mwritz/Documents/VisualStudioCode/pflege/df.csv", sep=";", index=False)
+  #print(df2)
+  #df2.to_csv("C:/Users/mwritz/Documents/VisualStudioCode/pflege/df2.csv", sep=";", index=False)
+  #print(df)
+  print(full_df)
+
+  #print(df['pgb'].sum())
+
+  cur.close()
+
+  conn.close()
+
+
+
 def main():
-  pflege("statistik", "mwritz", "dbadmin")
+  #pflege("statistik", "mwritz", "dbadmin")
   #pflegestufe("statistik", "mwritz", "dbadmin")
+  pflegeprognose("statistik", "mwritz", "dbadmin")
+  pass
 
 
 if __name__ == '__main__':
