@@ -126,6 +126,72 @@ def pflegestufe(db, user, password):
   cur.close() 
   conn.close()
 
+
+def pflegeprog(db, user, password):
+  cur, conn = connection(db, user, password)
+
+  query = '''WITH CTE AS (SELECT 
+                        jahr,
+                        gruppe_5,
+                        geschlecht,
+                        bkz_id,
+                        SUM(pgb) AS pgb,
+                        SUM(bev) AS bev,
+                        SUM(pgb)/SUM(bev)*100 AS rate
+                    FROM 
+                        projekte.v_pflege_plz
+                    LEFT JOIN
+                        public.v_plz ON
+                            projekte.v_pflege_plz.plz = public.v_plz.id
+                    WHERE 
+                        jahr = 2022
+                    GROUP BY
+                        jahr,
+                        gruppe_5,
+                        geschlecht,
+                        bkz_id),
+                        
+        CTE2 AS (SELECT
+                        jahr,
+                        CAST(LEFT(gkz, 3) AS INT) AS bkz_id,
+                        geschlecht,
+                        gruppe_5,
+                        SUM(pop) AS pop
+                    FROM
+                        public.t_einzeljahre_prog
+                    LEFT JOIN
+                        projekte.l_pflege_alter ON
+                            CAST(projekte.l_pflege_alter.id AS INT) = public.t_einzeljahre_prog.alter
+                    GROUP BY
+                        bkz_id,
+                        geschlecht,
+                        gruppe_5,
+                        jahr
+                        ) 
+        SELECT CTE2.jahr,
+                CTE2.geschlecht,
+                CTE2.gruppe_5,
+                CTE2.bkz_id,
+                CTE2.pop,
+                CTE.rate
+                FROM CTE2
+                    left JOIN 
+                        CTE ON
+                        concat(cte2.bkz_id, cte2.geschlecht, cte2.gruppe_5)
+                        = concat(cte.bkz_id, case when cte.geschlecht ='männlich' then 1 else 2 end, cte.gruppe_5)
+    '''
+  cur.execute(query)
+  tuples_list = cur.fetchall()
+  colnames = [desc[0] for desc in cur.description]
+  df = pd.DataFrame(tuples_list, columns=colnames)
+  df['pgb_forecast'] = df['pop'] / 100 * df['rate'].astype(float)
+  bkz_df = df.groupby(['bkz_id', 'jahr']).agg({'pop': 'sum', 'pgb_forecast': 'sum'}).reset_index()
+  bkz_df.to_csv("C:/Users/mwritz/Documents/VisualStudioCode/pflege/bkz_df5.csv", sep=";", index=False, decimal=",")
+  print(bkz_df)
+
+
+
+
 def pflegeprognose(db, user, password):
   cur, conn = connection(db, user, password)
 
@@ -203,7 +269,7 @@ def pflegeprognose(db, user, password):
 def main():
   #pflege("statistik", "mwritz", "dbadmin")
   #pflegestufe("statistik", "mwritz", "dbadmin")
-  pflegeprognose("statistik", "mwritz", "dbadmin")
+  pflegeprog("statistik", "mwritz", "dbadmin")
   pass
 
 
